@@ -1,0 +1,104 @@
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+
+public class LANScanner {
+    private static final int TIMEOUT_MS = 1000; 
+    private static final int SCAN_INTERVAL_MS = 30000;
+    private static final Map<String, Boolean> activeHosts = new HashMap<>();
+    
+    public static void main(String[] args) throws IOException {
+        String localSubnet = getLocalSubnet();
+        String gatewayIP = getGatewayIP();
+
+        System.out.println("Локальна підмережа: " + localSubnet);
+        System.out.println("IP-адреса гейтвея: " + gatewayIP);
+        System.out.println("Запуск сканування...");
+
+        while (true) {
+            scanNetwork(localSubnet, gatewayIP);
+            printActiveHosts();
+            sleep(SCAN_INTERVAL_MS);
+        }
+    }
+
+    private static void scanNetwork(String subnet, String gatewayIP) {
+        Map<String, Boolean> newActiveHosts = new HashMap<>();     
+        for (int i = 1; i < 255; i++) {
+            String host = subnet + i;
+            if (host.equals(gatewayIP)) continue; 
+            
+            boolean reachable = isHostReachable(host);
+            if (reachable) {
+                newActiveHosts.put(host, true);
+            }
+        }
+        Iterator<Map.Entry<String, Boolean>> iterator = activeHosts.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<String, Boolean> entry = iterator.next();
+            if (!newActiveHosts.containsKey(entry.getKey())) {
+                System.out.println("❌ Хост " + entry.getKey() + " став недоступним");
+                iterator.remove();
+            }
+        }
+        activeHosts.putAll(newActiveHosts);
+    }
+    private static boolean isHostReachable(String host) {
+        try {
+            return InetAddress.getByName(host).isReachable(TIMEOUT_MS);
+        } catch (IOException e) {
+            return false;
+        }
+    }
+    private static void printActiveHosts() {
+        System.out.println("✅ Активні хости:");
+        for (String host : activeHosts.keySet()) {
+            System.out.println(" - " + host);
+        }
+    }
+    private static String getLocalSubnet() throws SocketException {
+        Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+        while (interfaces.hasMoreElements()) {
+            NetworkInterface ni = interfaces.nextElement();
+            Enumeration<InetAddress> addresses = ni.getInetAddresses();
+            while (addresses.hasMoreElements()) {
+                InetAddress addr = addresses.nextElement();
+                String ip = addr.getHostAddress();
+                if (ip.matches("\\d+\\.\\d+\\.\\d+\\.\\d+")) {
+                    return ip.substring(0, ip.lastIndexOf('.') + 1);
+                }
+            }
+        }
+        throw new RuntimeException("Не вдалося отримати локальну підмережу");
+    }
+
+    private static String getGatewayIP() {
+        try {
+            Process process = Runtime.getRuntime().exec("ipconfig");
+            java.util.Scanner s = new java.util.Scanner(process.getInputStream()).useDelimiter("\\A");
+            String result = s.hasNext() ? s.next() : "";
+            s.close();
+            
+            for (String line : result.split("\n")) {
+                if (line.trim().startsWith("Default Gateway") || line.trim().contains("Шлюз за замовчуванням")) {
+                    return line.split(":")[1].trim();
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return "";
+    }
+
+    private static void sleep(int ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException ignored) {
+        }
+    }
+}
